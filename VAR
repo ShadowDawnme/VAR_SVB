@@ -1,1 +1,347 @@
 
+clear all
+cd /Volumes/mdonglian/Local/Work/Projects/PolyU/cryptorun/stata2
+
+
+* 202303  on okx
+clear all
+import delimited using okx_1m_202303.csv 
+drop if datetime == ""
+* datetime format
+gen double eventtime = clock(datetime, "YMDhms"), after(datetime)
+format eventtime %tc
+tsset eventtime, delta(60000)
+* Define the start and end times
+gen double start_time = clock("2023-03-08 00:01:00", "YMDhms")
+gen double end_time = clock("2023-03-11 00:00:00", "YMDhms")
+* Create a logical variable for the interval
+gen in_interval1 = (eventtime >= clock("2023-03-08 00:00:00", "YMDhms") & eventtime < clock("2023-03-11 00:00:00", "YMDhms"))
+gen in_interval2 = (eventtime >= clock("2023-03-11 00:00:00", "YMDhms") & eventtime < clock("2023-03-14 00:00:00", "YMDhms"))
+
+* summary statistics
+tabstat ethdai_close_return ethusdc_close_return ethusdt_close_return  if in_interval1, stat(n mean sd min p25 p50 p75 max sk k) save
+mat T = r(StatTotal)
+putexcel set "summary.xlsx", replace
+putexcel A1 = matrix(T), names
+
+* select the optimal lags
+varsoc ethdai_close_return ethusdc_close_return ethusdt_close_return if in_interval1, maxlag(10)
+* VAR model
+var ethdai_close_return ethusdc_close_return ethusdt_close_return if in_interval1, lags(1/5)
+* save to local
+outreg2 using "var.xlsx", replace
+* granger test
+vargranger
+* save results for irf
+irf create pre_irf, step(5) set(okx_combined_irf_results) replace
+
+
+* summary statistics
+tabstat ethdai_close_return ethusdc_close_return ethusdt_close_return  if in_interval2, stat(n mean sd min p25 p50 p75 max sk k) save
+mat T = r(StatTotal)
+putexcel set "summary.xlsx", replace
+putexcel A1 = matrix(T), names
+
+* select the optimal lags
+varsoc ethdai_close_return ethusdc_close_return ethusdt_close_return if in_interval2, maxlag(10)
+* VAR model
+var ethdai_close_return ethusdc_close_return ethusdt_close_return if in_interval2, lags(1/5)
+* save to local
+outreg2 using "var.xlsx", replace
+* granger test
+vargranger
+* save results for irf
+irf create post_irf, step(5) set(okx_combined_irf_results)
+* plot irf
+irf graph oirf, impulse(ethusdc_close_return) response(ethdai_close_return  ethusdt_close_return) note("")
+graph export "/Volumes/mdonglian/Local/Work/Projects/PolyU/cryptorun/stata2/fig/okx_202303_oirf.pdf", as(pdf) name("Graph") replace
+
+
+*to test significance of diffs
+
+var ethdai_close_return ethusdc_close_return ethusdt_close_return if in_interval1, lags(1/5)
+estimates store m1
+
+var ethdai_close_return ethusdc_close_return ethusdt_close_return if in_interval2, lags(1/5)
+estimates store m2
+
+estimates restore m1
+matrix b_m1 = e(b)
+matrix V_m1 = e(V)
+
+estimates restore m2
+matrix b_m2 = e(b)
+matrix V_m2 = e(V)
+
+
+
+* Assumption: b_m1 and b_m2 are 1xN matrices and V_m1, V_m2 are NxN matrices
+* The number of coefficients (columns in b_m1 or b_m2)
+local N = colsof(b_m1)
+display `N'
+
+* Setup a new dataset with the appropriate number of observations
+gen b1 = .
+gen b2 = .
+gen difference = .
+gen se_diff = .
+gen z_score = .
+gen p_value = .
+
+* Loop through each coefficient to compare and store results
+forval i = 1/`N' {
+    * Extract i-th coefficients and their variances
+    local b1_val = b_m1[1,`i']
+    local b2_val = b_m2[1,`i']
+    local v1 = V_m1[`i',`i']
+    local v2 = V_m2[`i',`i']
+
+    * Calculate the difference in coefficients and the standard error of the difference
+    local diff = `b2_val' - `b1_val'
+    local se_diff = sqrt(`v1' + `v2')
+
+    * Calculate the Z-score for the difference and the p-value
+    local z = `diff' / `se_diff'
+    local p_value = 2 * (1 - normal(abs(`z')))
+
+    * Store results in the dataset
+    replace b1 = `b1_val' in `i'
+    replace b2 = `b2_val' in `i'
+    replace difference = `diff' in `i'
+    replace se_diff = `se_diff' in `i'
+    replace z_score = `z' in `i'
+    replace p_value = `p_value' in `i'
+}
+
+* Save the dataset to a CSV file containing coefficients and comparison results
+export delimited using "var_model_comparison_results.csv", replace
+
+
+* 202303 on uniswapv2
+clear all
+import delimited using uniswap_v2_202303.csv 
+drop if datetime == ""
+gen double eventtime = clock(datetime, "YMDhms"), after(datetime)
+format eventtime %tc
+tsset eventtime, delta(300000)
+
+* Define the start and end times
+gen double start_time = clock("2023-03-08 00:00:00", "YMDhms")
+gen double end_time = clock("2023-03-11 00:00:00", "YMDhms")
+* Create a logical variable for the interval
+gen in_interval1 = (eventtime >= clock("2023-03-08 00:00:00", "YMDhms") & eventtime < clock("2023-03-11 00:00:00", "YMDhms"))
+gen in_interval2 = (eventtime >= clock("2023-03-11 00:00:00", "YMDhms") & eventtime < clock("2023-03-14 00:00:00", "YMDhms"))
+
+* summary statistics
+tabstat wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval1, stat(n mean sd min p25 p50 p75 max sk k) save
+mat T = r(StatTotal)
+putexcel set "summary.xlsx", replace
+putexcel A1 = matrix(T), names
+
+* select the optimal lags
+varsoc wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval1, maxlag(10)
+* VAR model
+var wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval1, lags(1/5)
+* save to local
+outreg2 using "var.xlsx", replace
+* granger test
+vargranger
+* save results for irf
+irf create pre_irf, step(5) set(uniswapv2_combined_irf_results) replace
+
+
+* summary statistics
+tabstat wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval2, stat(n mean sd min p25 p50 p75 max sk k) save
+mat T = r(StatTotal)
+putexcel set "summary.xlsx", replace
+putexcel A1 = matrix(T), names
+
+* select the optimal lags
+varsoc wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval2, maxlag(10)
+* VAR model
+var wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval2, lags(1/5)
+* save to local
+outreg2 using "var.xlsx", replace
+* granger test
+vargranger
+* save results for irf
+irf create post_irf, step(5) set(uniswapv2_combined_irf_results)
+
+* plot irf
+irf graph oirf, impulse(wethusdc_close_return) response(wethdai_close_return  wethusdt_close_return)
+graph export "/Volumes/mdonglian/Local/Work/Projects/PolyU/cryptorun/stata2/fig/uniswapv2_202303_oirf.pdf", as(pdf) name("Graph") replace
+
+# significance of diffs
+
+var wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval1, lags(1/5)
+estimates store m1
+
+var wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval2, lags(1/5)
+estimates store m2
+
+estimates restore m1
+matrix b_m1 = e(b)
+matrix V_m1 = e(V)
+
+estimates restore m2
+matrix b_m2 = e(b)
+matrix V_m2 = e(V)
+
+
+
+* Assumption: b_m1 and b_m2 are 1xN matrices and V_m1, V_m2 are NxN matrices
+* The number of coefficients (columns in b_m1 or b_m2)
+local N = colsof(b_m1)
+display `N'
+
+* Setup a new dataset with the appropriate number of observations
+gen b1 = .
+gen b2 = .
+gen difference = .
+gen se_diff = .
+gen z_score = .
+gen p_value = .
+
+* Loop through each coefficient to compare and store results
+forval i = 1/`N' {
+    * Extract i-th coefficients and their variances
+    local b1_val = b_m1[1,`i']
+    local b2_val = b_m2[1,`i']
+    local v1 = V_m1[`i',`i']
+    local v2 = V_m2[`i',`i']
+
+    * Calculate the difference in coefficients and the standard error of the difference
+    local diff = `b2_val' - `b1_val'
+    local se_diff = sqrt(`v1' + `v2')
+
+    * Calculate the Z-score for the difference and the p-value
+    local z = `diff' / `se_diff'
+    local p_value = 2 * (1 - normal(abs(`z')))
+
+    * Store results in the dataset
+    replace b1 = `b1_val' in `i'
+    replace b2 = `b2_val' in `i'
+    replace difference = `diff' in `i'
+    replace se_diff = `se_diff' in `i'
+    replace z_score = `z' in `i'
+    replace p_value = `p_value' in `i'
+}
+
+* Save the dataset to a CSV file containing coefficients and comparison results
+export delimited using "var_model_comparison_results.csv", replace
+
+
+* 202303 on uniswapv3
+clear all
+import delimited using uniswap_v3_202303.csv 
+drop if datetime == ""
+gen double eventtime = clock(datetime, "YMDhms"), after(datetime)
+format eventtime %tc
+tsset eventtime, delta(300000)
+
+* Define the start and end times
+gen double start_time = clock("2023-03-08 00:00:00", "YMDhms")
+gen double end_time = clock("2023-03-11 00:00:00", "YMDhms")
+* Create a logical variable for the interval
+gen in_interval1 = (eventtime >= clock("2023-03-08 00:00:00", "YMDhms") & eventtime < clock("2023-03-11 00:00:00", "YMDhms"))
+gen in_interval2 = (eventtime >= clock("2023-03-11 00:00:00", "YMDhms") & eventtime < clock("2023-03-14 00:00:00", "YMDhms"))
+
+* summary statistics
+tabstat wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval1, stat(n mean sd min p25 p50 p75 max sk k) save
+mat T = r(StatTotal)
+putexcel set "summary.xlsx", replace
+putexcel A1 = matrix(T), names
+
+* select the optimal lags
+varsoc wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval1, maxlag(10)
+* VAR model
+var wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval1, lags(1/5)
+* save to local
+outreg2 using "var.xlsx", replace
+* granger test
+vargranger
+
+* save results for irf
+irf create pre_irf, step(5) set(uniswapv3_combined_irf_results) replace
+
+
+* summary statistics
+tabstat wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval2, stat(n mean sd min p25 p50 p75 max sk k) save
+mat T = r(StatTotal)
+putexcel set "summary.xlsx", replace
+putexcel A1 = matrix(T), names
+
+* select the optimal lags
+varsoc wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval2, maxlag(10)
+* VAR model
+var wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval2, lags(1/5)
+* save to local
+outreg2 using "var.xlsx", replace
+* granger test
+vargranger
+
+* save results for irf
+irf create post_irf, step(5) set(uniswapv3_combined_irf_results)
+* plot irf
+irf graph oirf, irf(pre_irf post_irf) impulse(wethusdc_close_return) response(wethdai_close_return wethusdt_close_return)
+graph export "/Volumes/mdonglian/Local/Work/Projects/PolyU/cryptorun/stata2/fig/uniswapv3_202303_oirf.pdf", as(pdf) name("Graph") replace
+
+
+
+# significance of diffs
+var wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval1, lags(1/5)
+estimates store m1
+
+var wethdai_close_return wethusdc_close_return  wethusdt_close_return if in_interval2, lags(1/5)
+estimates store m2
+
+estimates restore m1
+matrix b_m1 = e(b)
+matrix V_m1 = e(V)
+
+estimates restore m2
+matrix b_m2 = e(b)
+matrix V_m2 = e(V)
+
+
+
+* Assumption: b_m1 and b_m2 are 1xN matrices and V_m1, V_m2 are NxN matrices
+* The number of coefficients (columns in b_m1 or b_m2)
+local N = colsof(b_m1)
+display `N'
+
+* Setup a new dataset with the appropriate number of observations
+gen b1 = .
+gen b2 = .
+gen difference = .
+gen se_diff = .
+gen z_score = .
+gen p_value = .
+
+* Loop through each coefficient to compare and store results
+forval i = 1/`N' {
+    * Extract i-th coefficients and their variances
+    local b1_val = b_m1[1,`i']
+    local b2_val = b_m2[1,`i']
+    local v1 = V_m1[`i',`i']
+    local v2 = V_m2[`i',`i']
+
+    * Calculate the difference in coefficients and the standard error of the difference
+    local diff = `b2_val' - `b1_val'
+    local se_diff = sqrt(`v1' + `v2')
+
+    * Calculate the Z-score for the difference and the p-value
+    local z = `diff' / `se_diff'
+    local p_value = 2 * (1 - normal(abs(`z')))
+
+    * Store results in the dataset
+    replace b1 = `b1_val' in `i'
+    replace b2 = `b2_val' in `i'
+    replace difference = `diff' in `i'
+    replace se_diff = `se_diff' in `i'
+    replace z_score = `z' in `i'
+    replace p_value = `p_value' in `i'
+}
+
+* Save the dataset to a CSV file containing coefficients and comparison results
+export delimited using "var_model_comparison_results.csv", replace
